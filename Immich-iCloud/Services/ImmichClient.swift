@@ -32,7 +32,7 @@ actor ImmichClient {
     // MARK: - Connection Test
 
     func testConnection() async throws -> ImmichServerInfo {
-        // Ping
+        // Ping (public endpoint — verifies server is reachable)
         let pingURL = try buildURL(path: "/api/server/ping")
         let pingData = try await performGET(url: pingURL)
         let ping = try decoder.decode(ImmichPingResponse.self, from: pingData)
@@ -40,10 +40,14 @@ actor ImmichClient {
             throw AppError.immichConnectionFailed("Unexpected ping response: \(ping.res)")
         }
 
-        // Version
+        // Version (public endpoint)
         let versionURL = try buildURL(path: "/api/server/version")
         let versionData = try await performGET(url: versionURL)
         let version = try decoder.decode(ImmichServerVersion.self, from: versionData)
+
+        // Validate API key (authenticated endpoint)
+        let myUserURL = try buildURL(path: "/api/users/me")
+        _ = try await performGET(url: myUserURL)
 
         return ImmichServerInfo(
             version: version.displayString,
