@@ -68,7 +68,7 @@ actor ImmichClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("application/multipart-form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         applyAuth(to: &request)
 
         var body = Data()
@@ -196,12 +196,13 @@ actor ImmichClient {
         }
 
         guard (200...299).contains(http.statusCode) else {
-            // Try to parse error message from response body
+            // Try to parse structured error from Immich
             if let errorResponse = try? decoder.decode(ImmichErrorResponse.self, from: data) {
-                let msg = errorResponse.message ?? errorResponse.error ?? "Unknown error"
-                throw AppError.immichConnectionFailed("HTTP \(http.statusCode): \(msg)")
+                throw AppError.immichConnectionFailed("HTTP \(http.statusCode): \(errorResponse.displayMessage)")
             }
-            throw AppError.immichConnectionFailed("HTTP \(http.statusCode)")
+            // Fallback: show raw body for debugging
+            let body = String(data: data.prefix(500), encoding: .utf8) ?? "Non-UTF8 response"
+            throw AppError.immichConnectionFailed("HTTP \(http.statusCode): \(body)")
         }
     }
 

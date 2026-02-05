@@ -63,7 +63,42 @@ struct ImmichExifInfo: Codable {
 // MARK: - Error Response
 
 struct ImmichErrorResponse: Codable {
-    let message: String?
+    let message: ImmichErrorMessage?
     let error: String?
     let statusCode: Int?
+
+    var displayMessage: String {
+        let msg: String
+        switch message {
+        case .single(let s): msg = s
+        case .array(let arr): msg = arr.joined(separator: "; ")
+        case .none: msg = error ?? "Unknown error"
+        }
+        return msg
+    }
+}
+
+/// Immich returns `message` as either a string or an array of strings
+enum ImmichErrorMessage: Codable {
+    case single(String)
+    case array([String])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self) {
+            self = .single(str)
+        } else if let arr = try? container.decode([String].self) {
+            self = .array(arr)
+        } else {
+            self = .single("Unknown error")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .single(let s): try container.encode(s)
+        case .array(let arr): try container.encode(arr)
+        }
+    }
 }
