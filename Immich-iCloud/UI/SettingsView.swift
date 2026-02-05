@@ -311,7 +311,7 @@ struct SettingsView: View {
     private var updatesSection: some View {
         GroupBox("Updates") {
             VStack(alignment: .leading, spacing: 12) {
-                if let updater = appState.sparkleUpdater {
+                if let updater = appState.sparkleUpdater, updater.isConfigured {
                     Toggle("Check for updates automatically", isOn: Binding(
                         get: { updater.automaticallyChecksForUpdates },
                         set: { updater.automaticallyChecksForUpdates = $0 }
@@ -325,18 +325,18 @@ struct SettingsView: View {
                     .buttonStyle(.bordered)
                     .disabled(!updater.canCheckForUpdates)
                     .help("Check the bytePatrol/Immich-iCloud GitHub repo for a newer version")
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "link")
-                            .foregroundStyle(.secondary)
-                        Text("github.com/bytePatrol/Immich-iCloud")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 } else {
-                    Text("Initializing update checker...")
+                    Text("Updates will be available once code signing is configured.")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "link")
+                        .foregroundStyle(.secondary)
+                    Text("github.com/bytePatrol/Immich-iCloud")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 8)
