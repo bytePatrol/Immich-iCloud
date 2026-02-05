@@ -11,16 +11,13 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    MARKETING_VERSION: "1.1.1"
-    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "2.1.0"
+    CURRENT_PROJECT_VERSION: "5"
 
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "7.0.0"
-  Sparkle:
-    url: https://github.com/sparkle-project/Sparkle
-    from: "2.0.0"
 
 targets:
   Immich-iCloud:
@@ -39,7 +36,6 @@ targets:
         CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: YES
     dependencies:
       - package: GRDB
-      - package: Sparkle
     entitlements:
       path: Immich-iCloud/Immich-iCloud.entitlements
       properties:

@@ -51,6 +51,10 @@ struct HelpGuideView: View {
                     .tag(HelpSection.dryRun)
                 Label("Backup & Restore", systemImage: "externaldrive")
                     .tag(HelpSection.backup)
+                Label("Database Location", systemImage: "folder.badge.gearshape")
+                    .tag(HelpSection.databaseLocation)
+                Label("Database Snapshots", systemImage: "clock.arrow.circlepath")
+                    .tag(HelpSection.snapshots)
             }
             Section("Reference") {
                 Label("Troubleshooting", systemImage: "wrench.and.screwdriver")
@@ -93,6 +97,8 @@ struct HelpGuideView: View {
                 case .ledger: ledgerContent
                 case .dryRun: dryRunContent
                 case .backup: backupContent
+                case .databaseLocation: databaseLocationContent
+                case .snapshots: snapshotsContent
                 case .troubleshooting: troubleshootingContent
                 case .faq: faqContent
                 case .about: aboutContent
@@ -494,6 +500,102 @@ struct HelpGuideView: View {
         }
     }
 
+    // MARK: - Database Location
+
+    private var databaseLocationContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionTitle("Database Location", icon: "folder.badge.gearshape")
+
+            paragraph("""
+            By default, Immich-iCloud stores its ledger database in your Application Support folder. \
+            You can move it to a cloud-synced folder (Dropbox, iCloud Drive, OneDrive, etc.) to share \
+            your upload history between multiple Macs.
+            """)
+
+            subsection("How It Works")
+            numberedList([
+                "Go to Settings > Database Location",
+                "Click \"Set Custom Location...\" and choose a folder (e.g., ~/Dropbox/Immich-iCloud/)",
+                "Optionally migrate your existing database to the new location",
+                "Restart the app for the change to take effect"
+            ])
+
+            subsection("Cloud Sync Benefits")
+            bulletList([
+                "Share upload history across multiple Macs without re-uploading everything",
+                "Automatic backup of your ledger via your cloud service",
+                "Easy migration when switching computers"
+            ])
+
+            warning("Single Mac at a time", "Do NOT run Immich-iCloud on two Macs simultaneously with the same database location. SQLite is not designed for concurrent network access and may corrupt the database.")
+
+            subsection("WAL Checkpoint on Quit")
+            paragraph("""
+            SQLite uses Write-Ahead Logging (WAL) which creates extra files (.sqlite-wal, .sqlite-shm). \
+            Cloud services can desync these files, causing corruption. To prevent this, Immich-iCloud \
+            automatically checkpoints (merges) the WAL file into the main database when the app quits, \
+            leaving only the single .sqlite file for your cloud service to sync.
+            """)
+
+            subsection("Reverting to Default")
+            paragraph("To return to the default location, click \"Use Default\" in Settings > Database Location, then restart the app.")
+
+            tip("Validate before setting", "Immich-iCloud validates that the selected folder is writable before accepting it. If you see an error, check folder permissions or try a different location.")
+        }
+    }
+
+    // MARK: - Database Snapshots
+
+    private var snapshotsContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionTitle("Database Snapshots", icon: "clock.arrow.circlepath")
+
+            paragraph("""
+            Database Snapshots provide automatic, periodic backups of your ledger database. \
+            If something goes wrong, you can restore to a previous snapshot and recover your upload history.
+            """)
+
+            subsection("How It Works")
+            bulletList([
+                "Snapshots are created automatically every hour when the app is running",
+                "The first snapshot is created shortly after the app launches",
+                "Each snapshot is a complete copy of your ledger.sqlite file",
+                "Snapshots are stored in a \"snapshots\" subfolder within your database directory"
+            ])
+
+            subsection("Retention Policy")
+            paragraph("To prevent unlimited disk usage, snapshots are automatically pruned:")
+            bulletList([
+                "Keep the 2 most recent hourly snapshots",
+                "Keep 1 daily snapshot (from a different calendar day)",
+                "Older snapshots are automatically deleted"
+            ])
+
+            subsection("Viewing Snapshots")
+            numberedList([
+                "Go to Settings > Database Snapshots",
+                "Click \"View Snapshots...\"",
+                "A list shows each snapshot's date, time, and file size"
+            ])
+
+            subsection("Restoring a Snapshot")
+            numberedList([
+                "Open the Snapshots view from Settings",
+                "Find the snapshot you want to restore",
+                "Click \"Restore\" and confirm",
+                "A pre-restore backup of your current database is created automatically",
+                "Restart the app for the restored database to take effect"
+            ])
+
+            warning("Restart required", "After restoring a snapshot, you MUST restart the app. The database is already open in memory, so changes only take effect after a fresh launch.")
+
+            subsection("Enabling/Disabling Snapshots")
+            paragraph("Toggle \"Enable Automatic Snapshots\" in Settings > Database Snapshots. When disabled, no new snapshots are created, but existing ones are preserved.")
+
+            tip("Snapshot location", "Snapshots are stored alongside your database. If you use a custom database location (e.g., Dropbox), your snapshots are also synced to the cloud.")
+        }
+    }
+
     // MARK: - Troubleshooting
 
     private var troubleshootingContent: some View {
@@ -624,6 +726,48 @@ struct HelpGuideView: View {
                     "The scheduler runs 5 seconds after wake, so syncs resume after sleep"
                 ]
             )
+
+            troubleshootingItem(
+                problem: "Database location change not working",
+                causes: [
+                    "App was not restarted after changing location",
+                    "Selected folder is not writable",
+                    "Cloud folder path contains special characters"
+                ],
+                fixes: [
+                    "Quit and restart the app — database path is only read at launch",
+                    "Verify the folder has write permissions (ls -la in Terminal)",
+                    "Try a simpler path without spaces or special characters"
+                ]
+            )
+
+            troubleshootingItem(
+                problem: "Database corrupted after using cloud sync",
+                causes: [
+                    "App was running on two Macs simultaneously",
+                    "Cloud service desynced WAL files",
+                    "Network interruption during sync"
+                ],
+                fixes: [
+                    "Restore from a snapshot via Settings > Database Snapshots > View Snapshots",
+                    "If no snapshot exists, import a backup via Settings > Data Management",
+                    "As a last resort, reset the ledger (all assets will be re-uploaded)"
+                ]
+            )
+
+            troubleshootingItem(
+                problem: "No snapshots appearing in View Snapshots",
+                causes: [
+                    "Automatic snapshots are disabled",
+                    "App hasn't been running long enough for the first snapshot",
+                    "Snapshots folder is missing or inaccessible"
+                ],
+                fixes: [
+                    "Enable snapshots in Settings > Database Snapshots",
+                    "The first snapshot is created shortly after launch, then every hour",
+                    "Click 'Show Data Folder' and verify the snapshots subfolder exists"
+                ]
+            )
         }
     }
 
@@ -682,6 +826,21 @@ struct HelpGuideView: View {
                 question: "How do I update Immich-iCloud?",
                 answer: "The app automatically checks for updates from the GitHub repository (github.com/bytePatrol/Immich-iCloud). You can also manually check via Settings > Updates > \"Check for Updates Now\". Updates are delivered as signed DMGs from GitHub Releases."
             )
+
+            faqItem(
+                question: "Can I sync my database between multiple Macs?",
+                answer: "Yes! In Settings > Database Location, set a custom location in a cloud-synced folder (Dropbox, iCloud Drive, etc.). The ledger will sync between Macs. However, only run the app on ONE Mac at a time — simultaneous access can corrupt the database."
+            )
+
+            faqItem(
+                question: "How do I recover from a corrupted database?",
+                answer: "If automatic snapshots are enabled, go to Settings > Database Snapshots > View Snapshots and restore a recent snapshot. Alternatively, if you have an export backup (.immich-icloud-backup), import it via Settings > Data Management."
+            )
+
+            faqItem(
+                question: "Are snapshots created when the app is closed?",
+                answer: "No. Snapshots are created while the app is running, every hour. If you close the app, no new snapshots will be made until you reopen it. The first snapshot is created shortly after launch."
+            )
         }
     }
 
@@ -713,14 +872,15 @@ struct HelpGuideView: View {
                 "PhotoKit for library access",
                 "URLSession for Immich API communication",
                 "Keychain Services for secure API key storage",
-                "Sparkle for auto-updates",
+                "GitHub API for update checking",
                 "UserNotifications for sync alerts"
             ])
 
             subsection("Data Locations")
             definitionList([
                 ("Config", "~/Library/Application Support/Immich-iCloud/config.json"),
-                ("Ledger", "~/Library/Application Support/Immich-iCloud/ledger.sqlite"),
+                ("Ledger", "~/Library/Application Support/Immich-iCloud/ledger.sqlite (or custom location)"),
+                ("Snapshots", "~/Library/Application Support/Immich-iCloud/snapshots/ (or custom location)"),
                 ("Checkpoint", "~/Library/Application Support/Immich-iCloud/sync-checkpoint.json"),
                 ("Keychain", "macOS Keychain (service: com.immich-icloud.app)")
             ])
@@ -958,6 +1118,8 @@ private enum HelpSection: String, CaseIterable, Identifiable {
     case ledger = "Ledger & Deduplication"
     case dryRun = "Dry Run Mode"
     case backup = "Backup & Restore"
+    case databaseLocation = "Database Location"
+    case snapshots = "Database Snapshots"
     case troubleshooting = "Troubleshooting"
     case faq = "FAQ"
     case about = "About & Credits"

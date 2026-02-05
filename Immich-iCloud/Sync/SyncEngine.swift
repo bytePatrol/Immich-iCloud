@@ -7,6 +7,8 @@ final class SyncEngine {
     private let appState: AppState
     private var checkpointCounter = 0
     private let checkpointInterval = 10
+    private var currentSession: SyncSession?
+    private var sessionBytesTransferred: Int64 = 0
 
     init(appState: AppState) {
         self.appState = appState
@@ -25,6 +27,14 @@ final class SyncEngine {
         appState.syncProgress = SyncProgress()
         let isDryRun = appState.config.isDryRun
         let filterConfig = appState.config.filterConfig
+        sessionBytesTransferred = 0
+
+        // Create sync session for progress persistence
+        do {
+            currentSession = try await LedgerStore.shared.createSyncSession(isDryRun: isDryRun)
+        } catch {
+            AppLogger.shared.warning("Failed to create sync session: \(error.localizedDescription)", category: "Sync")
+        }
 
         AppLogger.shared.info("Sync started\(isDryRun ? " [DRY RUN]" : "")", category: "Sync")
 
@@ -58,6 +68,17 @@ final class SyncEngine {
             AppLogger.shared.info("Resuming from checkpoint: \(checkpoint.processedAssetIds.count) assets already processed", category: "Sync")
         }
 
+        // Load selected asset IDs for selective sync mode
+        var selectedAssetIds: Set<String> = []
+        if filterConfig.syncMode == .selectiveOnly || filterConfig.syncMode == .combined {
+            do {
+                selectedAssetIds = try await LedgerStore.shared.getSelectedAssetIds()
+                AppLogger.shared.info("Selective sync: \(selectedAssetIds.count) assets selected", category: "Sync")
+            } catch {
+                AppLogger.shared.warning("Failed to load selected assets: \(error.localizedDescription)", category: "Sync")
+            }
+        }
+
         for phAsset in fetchResult.assets {
             guard appState.isSyncing else { return handleCancellation() }
 
@@ -65,6 +86,23 @@ final class SyncEngine {
             if let checkpoint, checkpoint.processedAssetIds.contains(phAsset.localIdentifier) {
                 appState.syncProgress.skippedAssets += 1
                 continue
+            }
+
+            // Apply sync mode filter
+            switch filterConfig.syncMode {
+            case .selectiveOnly:
+                // Only process assets that are manually selected
+                if !selectedAssetIds.contains(phAsset.localIdentifier) {
+                    appState.syncProgress.skippedAssets += 1
+                    continue
+                }
+            case .combined:
+                // Process if either selected or passes filters (filters already applied in fetch)
+                // Just proceed - filters were applied during fetch
+                break
+            case .filterBased:
+                // Default behavior - no additional filtering
+                break
             }
 
             do {
@@ -266,7 +304,8 @@ final class SyncEngine {
         }
 
         // Step 4: Upload or simulate
-        let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(materialized.data.count), countStyle: .file)
+        let assetSize = Int64(materialized.data.count)
+        let sizeStr = ByteCountFormatter.string(fromByteCount: assetSize, countStyle: .file)
 
         if isDryRun {
             AppLogger.shared.info("[DRY RUN] Would upload \(filename) (\(sizeStr))", category: "Sync")
@@ -279,6 +318,9 @@ final class SyncEngine {
                 creationDate: phAsset.creationDate,
                 mediaType: mediaType
             )
+
+            // Track bytes transferred for session stats
+            sessionBytesTransferred += assetSize
 
             // Step 5: Record in ledger — this marks the asset as "uploaded forever"
             try await LedgerStore.shared.recordUpload(
@@ -346,6 +388,28 @@ final class SyncEngine {
 
         // Post notification
         let p = appState.syncProgress
+
+        // Finalize sync session
+        if var session = currentSession {
+            session.completedAt = Date()
+            session.status = phase == .complete ? SyncSessionStatus.completed.rawValue :
+                             phase == .failed ? SyncSessionStatus.failed.rawValue :
+                             SyncSessionStatus.cancelled.rawValue
+            session.totalScanned = p.totalAssets + p.skippedAssets
+            session.totalUploaded = p.uploadedAssets
+            session.totalSkipped = p.skippedAssets
+            session.totalFailed = p.failedAssets
+            session.bytesTransferred = sessionBytesTransferred
+            Task {
+                do {
+                    try await LedgerStore.shared.updateSyncSession(session)
+                } catch {
+                    AppLogger.shared.warning("Failed to update sync session: \(error.localizedDescription)", category: "Sync")
+                }
+            }
+            currentSession = nil
+        }
+
         if phase == .complete {
             AppDelegate.postSyncCompleteNotification(
                 uploaded: p.uploadedAssets,

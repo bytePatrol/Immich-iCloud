@@ -18,6 +18,10 @@ struct AppConfig: Codable {
     var filterConfig: FilterConfig = FilterConfig()
     var onboardingComplete: Bool = false
 
+    // v2.1.0: Custom Database Location & Snapshots
+    var customDatabasePath: String? = nil  // nil = use default ~/Library/Application Support/
+    var snapshotsEnabled: Bool = true
+
     init() {}
 
     init(from decoder: Decoder) throws {
@@ -32,6 +36,8 @@ struct AppConfig: Codable {
         autoSyncEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoSyncEnabled) ?? false
         filterConfig = try container.decodeIfPresent(FilterConfig.self, forKey: .filterConfig) ?? FilterConfig()
         onboardingComplete = try container.decodeIfPresent(Bool.self, forKey: .onboardingComplete) ?? false
+        customDatabasePath = try container.decodeIfPresent(String.self, forKey: .customDatabasePath)
+        snapshotsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapshotsEnabled) ?? true
     }
 
     // MARK: - Persistence

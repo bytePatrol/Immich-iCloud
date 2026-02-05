@@ -115,6 +115,130 @@ actor ImmichClient {
         return try decoder.decode(ImmichAssetInfo.self, from: data)
     }
 
+    // MARK: - Albums (F9: Album Creation on Immich)
+
+    func createAlbum(name: String, description: String? = nil) async throws -> ImmichAlbumResponse {
+        let url = try buildURL(path: "/api/albums")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+
+        struct CreateAlbumRequest: Codable {
+            let albumName: String
+            let description: String?
+        }
+
+        let reqBody = CreateAlbumRequest(albumName: name, description: description)
+        request.httpBody = try JSONEncoder().encode(reqBody)
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+
+        return try decoder.decode(ImmichAlbumResponse.self, from: data)
+    }
+
+    func addAssetsToAlbum(albumId: String, assetIds: [String]) async throws {
+        guard !assetIds.isEmpty else { return }
+
+        let url = try buildURL(path: "/api/albums/\(albumId)/assets")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+
+        struct AddAssetsRequest: Codable {
+            let ids: [String]
+        }
+
+        let reqBody = AddAssetsRequest(ids: assetIds)
+        request.httpBody = try JSONEncoder().encode(reqBody)
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+    }
+
+    func listAlbums() async throws -> [ImmichAlbumInfo] {
+        let url = try buildURL(path: "/api/albums")
+        let data = try await performGET(url: url)
+        return try decoder.decode([ImmichAlbumInfo].self, from: data)
+    }
+
+    func getAlbum(id: String) async throws -> ImmichAlbumInfo {
+        let url = try buildURL(path: "/api/albums/\(id)")
+        let data = try await performGET(url: url)
+        return try decoder.decode(ImmichAlbumInfo.self, from: data)
+    }
+
+    // MARK: - Asset Search (F7: Two-Way Sync)
+
+    func searchAssets(page: Int = 1, pageSize: Int = 1000) async throws -> ImmichAssetSearchResult {
+        let url = try buildURL(path: "/api/search/metadata")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+
+        struct SearchRequest: Codable {
+            let page: Int
+            let size: Int
+            let deviceId: String?
+        }
+
+        // Filter by our device ID to only get assets we uploaded
+        let reqBody = SearchRequest(page: page, size: pageSize, deviceId: "Immich-iCloud-macOS")
+        request.httpBody = try JSONEncoder().encode(reqBody)
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+
+        let searchResponse = try decoder.decode(ImmichSearchResponse.self, from: data)
+        return searchResponse.assets
+    }
+
+    func getAllOurAssets() async throws -> [ImmichAssetSummary] {
+        var allAssets: [ImmichAssetSummary] = []
+        var page = 1
+        let pageSize = 1000
+
+        while true {
+            let result = try await searchAssets(page: page, pageSize: pageSize)
+            allAssets.append(contentsOf: result.items)
+
+            if result.items.count < pageSize || result.nextPage == nil {
+                break
+            }
+            page += 1
+        }
+
+        return allAssets
+    }
+
+    func deleteAssets(ids: [String], force: Bool = false) async throws {
+        guard !ids.isEmpty else { return }
+
+        let url = try buildURL(path: "/api/assets")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+
+        struct DeleteRequest: Codable {
+            let ids: [String]
+            let force: Bool
+        }
+
+        let reqBody = DeleteRequest(ids: ids, force: force)
+        request.httpBody = try JSONEncoder().encode(reqBody)
+
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+    }
+
     // MARK: - Check for Existing Asset by Checksum
 
     func checkExistingAssets(checksums: [String]) async throws -> [String: String] {

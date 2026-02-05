@@ -6,6 +6,7 @@ struct FilterConfig: Codable, Equatable {
     var albumFilterMode: AlbumFilterMode = .all
     var selectedAlbumIds: [String] = []
     var excludedAlbumIds: [String] = []
+    var syncMode: SyncMode = .filterBased
 
     enum MediaTypeFilter: String, Codable, CaseIterable {
         case all = "All"
@@ -19,8 +20,15 @@ struct FilterConfig: Codable, Equatable {
         case excludeSelected = "Exclude Selected"
     }
 
+    /// Determines how assets are selected for sync
+    enum SyncMode: String, Codable, CaseIterable {
+        case filterBased = "Filter Based"      // Current behavior: use filters only
+        case selectiveOnly = "Selective Only"  // Only sync manually selected assets
+        case combined = "Combined"              // Filters + manually selected assets
+    }
+
     var hasActiveFilters: Bool {
-        mediaTypeFilter != .all || favoritesOnly || albumFilterMode != .all
+        mediaTypeFilter != .all || favoritesOnly || albumFilterMode != .all || syncMode != .filterBased
     }
 
     init() {}
@@ -32,6 +40,7 @@ struct FilterConfig: Codable, Equatable {
         albumFilterMode = try container.decodeIfPresent(AlbumFilterMode.self, forKey: .albumFilterMode) ?? .all
         selectedAlbumIds = try container.decodeIfPresent([String].self, forKey: .selectedAlbumIds) ?? []
         excludedAlbumIds = try container.decodeIfPresent([String].self, forKey: .excludedAlbumIds) ?? []
+        syncMode = try container.decodeIfPresent(SyncMode.self, forKey: .syncMode) ?? .filterBased
     }
 }
 
@@ -40,4 +49,13 @@ struct AlbumInfo: Identifiable, Hashable {
     let title: String
     let assetCount: Int
     let isSmartAlbum: Bool
+    let isSharedAlbum: Bool
+
+    init(id: String, title: String, assetCount: Int, isSmartAlbum: Bool, isSharedAlbum: Bool = false) {
+        self.id = id
+        self.title = title
+        self.assetCount = assetCount
+        self.isSmartAlbum = isSmartAlbum
+        self.isSharedAlbum = isSharedAlbum
+    }
 }

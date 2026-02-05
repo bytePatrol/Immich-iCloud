@@ -11,6 +11,10 @@ enum AppError: LocalizedError {
     case migrationImportFailed(String)
     case invalidBackupFile
     case fingerprintFailed(String)
+    case albumSyncFailed(String)
+    case reconciliationFailed(String)
+    case conflictResolutionFailed(String)
+    case snapshotRestoreFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -34,6 +38,14 @@ enum AppError: LocalizedError {
             return "The selected backup file is invalid or corrupted."
         case .fingerprintFailed(let detail):
             return "Asset fingerprinting failed: \(detail)"
+        case .albumSyncFailed(let detail):
+            return "Album sync failed: \(detail)"
+        case .reconciliationFailed(let detail):
+            return "Server reconciliation failed: \(detail)"
+        case .conflictResolutionFailed(let detail):
+            return "Conflict resolution failed: \(detail)"
+        case .snapshotRestoreFailed(let detail):
+            return "Snapshot restore failed: \(detail)"
         }
     }
 }

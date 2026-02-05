@@ -15,6 +15,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Checkpoint WAL to ensure all changes are merged into the main database file.
+        // This is critical for cloud sync (Dropbox, iCloud Drive, etc.) which may
+        // desync the .sqlite, .sqlite-wal, and .sqlite-shm files.
+        Task {
+            do {
+                try await LedgerStore.shared.checkpointAndClose()
+                AppLogger.shared.info("Database WAL checkpointed on quit", category: "App")
+            } catch {
+                AppLogger.shared.error("Failed to checkpoint database on quit: \(error.localizedDescription)", category: "App")
+            }
+        }
+    }
+
     // Show notifications even when app is in foreground
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,

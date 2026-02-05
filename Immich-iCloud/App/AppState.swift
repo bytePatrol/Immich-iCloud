@@ -39,10 +39,15 @@ final class AppState {
     var filteredOutCount: Int = 0
     var availableAlbums: [AlbumInfo] = []
 
-    // MARK: - Scheduler, Menu Bar & Updater
+    // MARK: - Selective Sync
+    var selectedAssetCount: Int = 0
+    var unresolvedConflictCount: Int = 0
+
+    // MARK: - Scheduler, Menu Bar, Updater & Snapshots
     var syncScheduler: SyncScheduler?
     var menuBarController: MenuBarController?
-    var sparkleUpdater: SparkleUpdater?
+    var updateChecker: GitHubUpdateChecker?
+    var snapshotManagerStarted = false
 
     // MARK: - Logs
     var logEvents: [LogEvent] = []
@@ -77,11 +82,32 @@ final class AppState {
         // Load ledger stats
         Task { [weak self] in
             await self?.refreshLedgerStats()
+            await self?.refreshSelectionCount()
+            await self?.refreshConflictCount()
         }
 
         AppLogger.shared.info("App initialized. Dry Run: \(loaded.isDryRun)", category: "App")
         if let startDate = loaded.startDate {
             AppLogger.shared.info("Start Date filter: \(Self.dateFormatter.string(from: startDate))", category: "App")
+        }
+
+        // Start SnapshotManager if enabled
+        if loaded.snapshotsEnabled {
+            SnapshotManager.shared.start()
+            snapshotManagerStarted = true
+        }
+    }
+
+    // MARK: - Snapshots
+
+    func setSnapshotsEnabled(_ enabled: Bool) {
+        config.snapshotsEnabled = enabled
+        if enabled && !snapshotManagerStarted {
+            SnapshotManager.shared.start()
+            snapshotManagerStarted = true
+        } else if !enabled && snapshotManagerStarted {
+            SnapshotManager.shared.stop()
+            snapshotManagerStarted = false
         }
     }
 
@@ -125,6 +151,22 @@ final class AppState {
             AppLogger.shared.warning("Ledger has been reset", category: "Ledger")
         } catch {
             AppLogger.shared.error("Failed to reset ledger: \(error.localizedDescription)", category: "Ledger")
+        }
+    }
+
+    func refreshSelectionCount() async {
+        do {
+            selectedAssetCount = try await LedgerStore.shared.getSelectionCount()
+        } catch {
+            AppLogger.shared.error("Failed to load selection count: \(error.localizedDescription)", category: "Ledger")
+        }
+    }
+
+    func refreshConflictCount() async {
+        do {
+            unresolvedConflictCount = try await LedgerStore.shared.getUnresolvedConflictCount()
+        } catch {
+            // Silently ignore - conflicts feature may not be used yet
         }
     }
 
@@ -278,7 +320,11 @@ final class AppState {
 enum SidebarTab: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case sync = "Sync"
+    case selectiveSync = "Selective"
+    case albums = "Albums"
     case history = "History"
+    case serverDiff = "Server Diff"
+    case conflicts = "Conflicts"
     case preview = "Preview"
     case logs = "Logs"
     case settings = "Settings"
@@ -289,7 +335,11 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         switch self {
         case .dashboard: return "square.grid.2x2"
         case .sync: return "arrow.triangle.2.circlepath"
+        case .selectiveSync: return "checkmark.square.fill"
+        case .albums: return "rectangle.stack"
         case .history: return "clock"
+        case .serverDiff: return "arrow.left.arrow.right"
+        case .conflicts: return "exclamationmark.triangle"
         case .preview: return "photo.on.rectangle"
         case .logs: return "doc.text"
         case .settings: return "gear"

@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var hasUnsavedCredentials = false
     @State private var showStartDate = false
     @State private var statusMessage: String?
+    @State private var showSnapshotsSheet = false
+    @State private var showRestartRequiredAlert = false
+    @State private var pendingDatabasePath: String?
 
     var body: some View {
         @Bindable var appState = appState
@@ -26,6 +29,8 @@ struct SettingsView: View {
                 retrySection(appState: appState)
                 filteringSection(appState: appState)
                 autoSyncSection(appState: appState)
+                databaseLocationSection(appState: appState)
+                snapshotsSection(appState: appState)
                 updatesSection
                 dataManagementSection
                 aboutSection
@@ -306,38 +311,231 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Updates (Sparkle)
+    // MARK: - Database Location
+
+    private func databaseLocationSection(appState: AppState) -> some View {
+        @Bindable var appState = appState
+
+        return GroupBox("Database Location") {
+            VStack(alignment: .leading, spacing: 12) {
+                LabeledContent("Current Location") {
+                    Text(currentDatabasePath)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 300, alignment: .trailing)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Set Custom Location...") {
+                        selectCustomDatabaseLocation()
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Store the database in a cloud-synced folder (Dropbox, iCloud Drive, etc.) for multi-Mac sync")
+
+                    if appState.config.customDatabasePath != nil {
+                        Button("Use Default") {
+                            pendingDatabasePath = nil
+                            appState.config.customDatabasePath = nil
+                            showRestartRequiredAlert = true
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Return to the default location in Application Support")
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Changing the database location requires an app restart.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if appState.config.customDatabasePath != nil {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cloud")
+                            .foregroundStyle(.blue)
+                        Text("Using custom location. Do not use on multiple Macs simultaneously.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .alert("Restart Required", isPresented: $showRestartRequiredAlert) {
+            Button("Quit Now") {
+                NSApplication.shared.terminate(nil)
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("The database location has been changed. Please restart the app for the change to take effect.")
+        }
+    }
+
+    private var currentDatabasePath: String {
+        if let customPath = appState.config.customDatabasePath, !customPath.isEmpty {
+            return customPath
+        }
+        return LedgerStore.databaseDirectoryURL.path
+    }
+
+    private func selectCustomDatabaseLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.title = "Select Database Location"
+        panel.message = "Choose a folder to store the database. For multi-Mac sync, select a cloud-synced folder like Dropbox or iCloud Drive."
+        panel.prompt = "Select"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Validate the location is writable
+        guard LedgerStore.validateDatabaseLocation(at: url) else {
+            statusMessage = "Cannot write to selected folder. Please choose a different location."
+            return
+        }
+
+        // Check if there's an existing database at the current location to migrate
+        let currentDBPath = LedgerStore.databaseURL
+        let newDBPath = url.appendingPathComponent("ledger.sqlite")
+
+        if FileManager.default.fileExists(atPath: currentDBPath.path) && !FileManager.default.fileExists(atPath: newDBPath.path) {
+            // Offer to copy the database to the new location
+            let alert = NSAlert()
+            alert.messageText = "Migrate Database?"
+            alert.informativeText = "Would you like to copy your existing database to the new location? If you choose not to copy, a new empty database will be created."
+            alert.addButton(withTitle: "Copy Database")
+            alert.addButton(withTitle: "Start Fresh")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            if response == .alertThirdButtonReturn {
+                return // Cancel
+            }
+
+            if response == .alertFirstButtonReturn {
+                // Copy database to new location
+                do {
+                    // Checkpoint WAL first
+                    Task {
+                        try await LedgerStore.shared.checkpoint()
+                    }
+                    try FileManager.default.copyItem(at: currentDBPath, to: newDBPath)
+                    AppLogger.shared.info("Database copied to \(url.path)", category: "Config")
+                } catch {
+                    statusMessage = "Failed to copy database: \(error.localizedDescription)"
+                    return
+                }
+            }
+        }
+
+        appState.config.customDatabasePath = url.path
+        showRestartRequiredAlert = true
+        AppLogger.shared.info("Database location changed to \(url.path)", category: "Config")
+    }
+
+    // MARK: - Database Snapshots
+
+    private func snapshotsSection(appState: AppState) -> some View {
+        @Bindable var appState = appState
+
+        return GroupBox("Database Snapshots") {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Enable Automatic Snapshots", isOn: Binding(
+                    get: { appState.config.snapshotsEnabled },
+                    set: { appState.setSnapshotsEnabled($0) }
+                ))
+                .help("Automatically create database backups every hour")
+
+                if appState.config.snapshotsEnabled {
+                    Text("Snapshots are created every hour. Keeps 2 hourly + 1 daily backup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("View Snapshots...") {
+                    showSnapshotsSheet = true
+                }
+                .buttonStyle(.bordered)
+                .help("View and restore database snapshots")
+            }
+            .padding(.vertical, 8)
+        }
+        .sheet(isPresented: $showSnapshotsSheet) {
+            SnapshotsView()
+        }
+    }
+
+    // MARK: - Updates (GitHub)
 
     private var updatesSection: some View {
         GroupBox("Updates") {
             VStack(alignment: .leading, spacing: 12) {
-                if let updater = appState.sparkleUpdater, updater.isConfigured {
-                    Toggle("Check for updates automatically", isOn: Binding(
-                        get: { updater.automaticallyChecksForUpdates },
-                        set: { updater.automaticallyChecksForUpdates = $0 }
-                    ))
-                    .help("When enabled, the app periodically checks GitHub for new releases")
+                if let checker = appState.updateChecker {
+                    HStack {
+                        Text("Current Version:")
+                            .foregroundStyle(.secondary)
+                        Text("v\(checker.currentVersion)")
+                            .fontWeight(.medium)
 
-                    Button("Check for Updates Now...") {
-                        updater.checkForUpdates()
-                        AppLogger.shared.info("Manual update check requested", category: "App")
+                        if checker.updateAvailable, let latest = checker.latestVersion {
+                            Text("→ v\(latest) available")
+                                .foregroundStyle(.green)
+                                .fontWeight(.medium)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!updater.canCheckForUpdates)
-                    .help("Check the bytePatrol/Immich-iCloud GitHub repo for a newer version")
-                } else {
-                    Text("Updates will be available once code signing is configured.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .font(.callout)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await checker.checkForUpdates(silent: false) }
+                        } label: {
+                            if checker.isChecking {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Check for Updates", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(checker.isChecking)
+                        .help("Check the bytePatrol/Immich-iCloud GitHub repo for a newer version")
+
+                        if checker.updateAvailable {
+                            Button {
+                                checker.openReleasesPage()
+                            } label: {
+                                Label("Download Update", systemImage: "arrow.down.circle")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .help("Open the GitHub releases page to download the latest version")
+                        }
+                    }
+
+                    if let lastCheck = checker.lastCheckDate {
+                        Text("Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
 
-                HStack(spacing: 6) {
-                    Image(systemName: "link")
-                        .foregroundStyle(.secondary)
-                    Text("github.com/bytePatrol/Immich-iCloud")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Divider()
+
+                Button {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/bytePatrol/Immich-iCloud/releases")!)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "link")
+                        Text("View All Releases on GitHub")
+                    }
                 }
+                .buttonStyle(.link)
+                .help("Open github.com/bytePatrol/Immich-iCloud/releases in your browser")
             }
             .padding(.vertical, 8)
         }

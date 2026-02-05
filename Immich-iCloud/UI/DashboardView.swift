@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
+    @State private var syncSummary: SyncSessionSummary?
 
     private var hasLedgerData: Bool {
         appState.ledgerStats.totalAssets > 0
@@ -34,6 +35,9 @@ struct DashboardView: View {
                 if hasLedgerData {
                     ledgerMetrics
                     uploadProgressBar
+                    if let summary = syncSummary, summary.totalSessions > 0 {
+                        allTimeStats(summary: summary)
+                    }
                     if appState.config.autoSyncEnabled, let scheduler = appState.syncScheduler {
                         autoSyncCountdown(scheduler: scheduler)
                     }
@@ -48,6 +52,15 @@ struct DashboardView: View {
         }
         .task {
             await appState.refreshLedgerStats()
+            await loadSyncSummary()
+        }
+    }
+
+    private func loadSyncSummary() async {
+        do {
+            syncSummary = try await LedgerStore.shared.getSyncSessionSummary()
+        } catch {
+            // Silently ignore - summary is optional
         }
     }
 
@@ -144,6 +157,36 @@ struct DashboardView: View {
                 .frame(width: 6, height: 6)
             Text(label)
         }
+    }
+
+    // MARK: - All-Time Stats
+
+    private func allTimeStats(summary: SyncSessionSummary) -> some View {
+        GroupBox {
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("All-Time Stats")
+                        .font(.subheadline.bold())
+                    HStack(spacing: 16) {
+                        Label("\(summary.totalSessions) syncs", systemImage: "arrow.triangle.2.circlepath")
+                        Label("\(summary.totalUploaded) uploaded", systemImage: "checkmark.circle")
+                        Label(summary.formattedBytesTransferred, systemImage: "arrow.up.circle")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    appState.selectedTab = .history
+                } label: {
+                    Label("View History", systemImage: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(.vertical, 2)
+        }
+        .help("Click 'View History' to see detailed sync session history")
     }
 
     // MARK: - Auto Sync Countdown

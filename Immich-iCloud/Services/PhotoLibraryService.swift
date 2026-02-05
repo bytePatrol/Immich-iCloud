@@ -127,11 +127,13 @@ actor PhotoLibraryService {
     struct AlbumFetchResult {
         let userAlbums: [AlbumInfo]
         let smartAlbums: [AlbumInfo]
+        let sharedAlbums: [AlbumInfo]
     }
 
     func fetchAlbums() -> AlbumFetchResult {
         var userAlbums: [AlbumInfo] = []
         var smartAlbums: [AlbumInfo] = []
+        var sharedAlbums: [AlbumInfo] = []
 
         // User albums
         let userCollections = PHAssetCollection.fetchAssetCollections(
@@ -143,7 +145,8 @@ actor PhotoLibraryService {
                 id: collection.localIdentifier,
                 title: collection.localizedTitle ?? "Untitled",
                 assetCount: count,
-                isSmartAlbum: false
+                isSmartAlbum: false,
+                isSharedAlbum: false
             ))
         }
 
@@ -158,13 +161,31 @@ actor PhotoLibraryService {
                 id: collection.localIdentifier,
                 title: collection.localizedTitle ?? "Untitled",
                 assetCount: count,
-                isSmartAlbum: true
+                isSmartAlbum: true,
+                isSharedAlbum: false
+            ))
+        }
+
+        // Shared albums (iCloud shared albums)
+        let sharedCollections = PHAssetCollection.fetchAssetCollections(
+            with: .album, subtype: .albumCloudShared, options: nil
+        )
+        sharedCollections.enumerateObjects { collection, _, _ in
+            let count = PHAsset.fetchAssets(in: collection, options: nil).count
+            guard count > 0 else { return }
+            sharedAlbums.append(AlbumInfo(
+                id: collection.localIdentifier,
+                title: collection.localizedTitle ?? "Untitled",
+                assetCount: count,
+                isSmartAlbum: false,
+                isSharedAlbum: true
             ))
         }
 
         return AlbumFetchResult(
             userAlbums: userAlbums.sorted { $0.title < $1.title },
-            smartAlbums: smartAlbums.sorted { $0.title < $1.title }
+            smartAlbums: smartAlbums.sorted { $0.title < $1.title },
+            sharedAlbums: sharedAlbums.sorted { $0.title < $1.title }
         )
     }
 

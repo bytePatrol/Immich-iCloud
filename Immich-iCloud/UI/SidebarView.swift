@@ -11,6 +11,7 @@ struct SidebarView: View {
                 Label(tab.rawValue, systemImage: tab.icon)
                     .tag(tab)
                     .badge(badge(for: tab))
+                    .help(tooltipForTab(tab))
             }
         }
         .listStyle(.sidebar)
@@ -72,8 +73,39 @@ struct SidebarView: View {
         switch tab {
         case .history:
             return appState.ledgerStats.failedCount
+        case .selectiveSync:
+            return appState.selectedAssetCount
+        case .conflicts:
+            return appState.unresolvedConflictCount
         default:
             return 0
+        }
+    }
+
+    // MARK: - Tooltips
+
+    private func tooltipForTab(_ tab: SidebarTab) -> String {
+        switch tab {
+        case .dashboard:
+            return "Overview of sync status and ledger statistics (Cmd+1)"
+        case .sync:
+            return "Start, monitor, and manage sync operations (Cmd+2)"
+        case .selectiveSync:
+            return "Manually select specific assets to sync"
+        case .albums:
+            return "Create and sync albums to your Immich server"
+        case .history:
+            return "View sync session history and ledger records (Cmd+3)"
+        case .serverDiff:
+            return "Compare local ledger with Immich server"
+        case .conflicts:
+            return "Review and resolve sync conflicts"
+        case .preview:
+            return "Scan and browse your Photos library assets (Cmd+4)"
+        case .logs:
+            return "View detailed log events for debugging (Cmd+5)"
+        case .settings:
+            return "Configure server, sync options, and preferences (Cmd+6)"
         }
     }
 }

@@ -31,9 +31,10 @@ struct Immich_iCloudApp: App {
                     appState.menuBarController = menuBar
                     menuBar.setup()
 
-                    // Setup Sparkle auto-updater
-                    let updater = SparkleUpdater()
-                    appState.sparkleUpdater = updater
+                    // Setup GitHub update checker
+                    let updateChecker = GitHubUpdateChecker()
+                    appState.updateChecker = updateChecker
+                    updateChecker.startAutomaticChecks()
                 }
         }
         .windowStyle(.titleBar)

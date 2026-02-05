@@ -102,3 +102,62 @@ enum ImmichErrorMessage: Codable {
         }
     }
 }
+
+// MARK: - Albums (F9: Album Creation on Immich)
+
+struct ImmichAlbumResponse: Codable {
+    let id: String
+    let albumName: String
+    let description: String?
+    let createdAt: String
+    let updatedAt: String
+    let assetCount: Int?
+}
+
+struct ImmichAlbumInfo: Codable, Identifiable {
+    let id: String
+    let albumName: String
+    let description: String?
+    let createdAt: String
+    let updatedAt: String
+    let assetCount: Int?
+    let ownerId: String?
+}
+
+struct ImmichAddAssetsResponse: Codable {
+    let id: String
+    let success: Bool?
+    let error: String?
+}
+
+struct ImmichBulkAddAssetsResponse: Codable {
+    let successfullyAdded: Int?
+    let alreadyInAlbum: [String]?
+}
+
+// MARK: - Asset Search (F7: Two-Way Sync)
+
+struct ImmichAssetSummary: Codable, Identifiable {
+    let id: String
+    let deviceId: String?
+    let deviceAssetId: String?
+    let checksum: String?
+    let originalFileName: String?
+    let fileCreatedAt: String?
+    let type: String?
+}
+
+struct ImmichSearchResponse: Codable {
+    let assets: ImmichAssetSearchResult
+}
+
+struct ImmichAssetSearchResult: Codable {
+    let items: [ImmichAssetSummary]
+    let total: Int
+    let count: Int
+    let nextPage: String?
+}
+
+struct ImmichDeleteResponse: Codable {
+    // No content expected on success (204)
+}

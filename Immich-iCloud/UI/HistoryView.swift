@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct HistoryView: View {
+struct LedgerRecordsView: View {
     @Environment(AppState.self) private var appState
 
     @State private var records: [LedgerRecord] = []
@@ -15,8 +15,8 @@ struct HistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Upload History")
-                    .font(.largeTitle.bold())
+                Text("Ledger Records")
+                    .font(.headline)
                 Spacer()
 
                 Picker("Status", selection: $filterStatus) {

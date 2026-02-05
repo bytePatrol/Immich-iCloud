@@ -14,7 +14,26 @@ actor LedgerStore {
     }
 
     static var databaseURL: URL {
-        databaseDirectoryURL.appendingPathComponent("ledger.sqlite")
+        // Check for custom database path
+        if let customPath = AppConfig.load().customDatabasePath,
+           !customPath.isEmpty {
+            let customDir = URL(fileURLWithPath: customPath)
+            try? FileManager.default.createDirectory(at: customDir, withIntermediateDirectories: true)
+            return customDir.appendingPathComponent("ledger.sqlite")
+        }
+        return databaseDirectoryURL.appendingPathComponent("ledger.sqlite")
+    }
+
+    /// Validates that the given directory is writable.
+    static func validateDatabaseLocation(at url: URL) -> Bool {
+        let testFile = url.appendingPathComponent(".immich-icloud-write-test")
+        do {
+            try "test".write(to: testFile, atomically: true, encoding: .utf8)
+            try FileManager.default.removeItem(at: testFile)
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Initialization
@@ -259,11 +278,337 @@ actor LedgerStore {
         }
     }
 
+    /// Checkpoint and truncate WAL file. Call before app quit to ensure
+    /// all changes are merged into the main database file for cloud sync.
+    func checkpointAndClose() throws {
+        try db().writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+    }
+
     // MARK: - Reset (Danger Zone)
 
     func resetLedger() throws {
         try db().write { db in
             try db.execute(sql: "DELETE FROM ledger")
+        }
+    }
+
+    // MARK: - Sync Sessions (F8: Progress Persistence)
+
+    func createSyncSession(isDryRun: Bool = false) throws -> SyncSession {
+        var session = SyncSession(isDryRun: isDryRun)
+        try db().write { db in
+            try session.insert(db)
+        }
+        return session
+    }
+
+    func updateSyncSession(_ session: SyncSession) throws {
+        try db().write { db in
+            try session.update(db)
+        }
+    }
+
+    func getSyncSession(id: Int64) throws -> SyncSession? {
+        try db().read { db in
+            try SyncSession.fetchOne(db, key: id)
+        }
+    }
+
+    func getSyncSessions(limit: Int = 50) throws -> [SyncSession] {
+        try db().read { db in
+            try SyncSession
+                .order(SyncSession.Columns.startedAt.desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    func getSyncSessionSummary() throws -> SyncSessionSummary {
+        try db().read { db in
+            let totalSessions = try SyncSession.fetchCount(db)
+            let totalUploaded = try Int.fetchOne(
+                db,
+                sql: "SELECT COALESCE(SUM(totalUploaded), 0) FROM sync_sessions"
+            ) ?? 0
+            let totalBytes = try Int64.fetchOne(
+                db,
+                sql: "SELECT COALESCE(SUM(bytesTransferred), 0) FROM sync_sessions"
+            ) ?? 0
+            let lastSync = try Date.fetchOne(
+                db,
+                sql: "SELECT MAX(completedAt) FROM sync_sessions WHERE status = ?",
+                arguments: [SyncSessionStatus.completed.rawValue]
+            )
+
+            return SyncSessionSummary(
+                totalSessions: totalSessions,
+                totalUploaded: totalUploaded,
+                totalBytesTransferred: totalBytes,
+                lastSyncDate: lastSync
+            )
+        }
+    }
+
+    func deleteSyncSession(id: Int64) throws {
+        try db().write { db in
+            try SyncSession.deleteOne(db, key: id)
+        }
+    }
+
+    func deleteAllSyncSessions() throws {
+        try db().write { db in
+            try SyncSession.deleteAll(db)
+        }
+    }
+
+    // MARK: - Selected Assets (F6: Selective Sync)
+
+    func addToSelection(localAssetId: String, syncPriority: Int = 0) throws {
+        try db().write { db in
+            // Check if already selected
+            if try SelectedAsset.filter(SelectedAsset.Columns.localAssetId == localAssetId).fetchCount(db) > 0 {
+                return
+            }
+            var asset = SelectedAsset(localAssetId: localAssetId, syncPriority: syncPriority)
+            try asset.insert(db)
+        }
+    }
+
+    func addToSelection(localAssetIds: [String], syncPriority: Int = 0) throws {
+        guard !localAssetIds.isEmpty else { return }
+        try db().write { db in
+            for localAssetId in localAssetIds {
+                if try SelectedAsset.filter(SelectedAsset.Columns.localAssetId == localAssetId).fetchCount(db) == 0 {
+                    var asset = SelectedAsset(localAssetId: localAssetId, syncPriority: syncPriority)
+                    try asset.insert(db)
+                }
+            }
+        }
+    }
+
+    func removeFromSelection(localAssetId: String) throws {
+        try db().write { db in
+            try SelectedAsset
+                .filter(SelectedAsset.Columns.localAssetId == localAssetId)
+                .deleteAll(db)
+        }
+    }
+
+    func removeFromSelection(localAssetIds: [String]) throws {
+        guard !localAssetIds.isEmpty else { return }
+        try db().write { db in
+            try SelectedAsset
+                .filter(localAssetIds.contains(SelectedAsset.Columns.localAssetId))
+                .deleteAll(db)
+        }
+    }
+
+    func clearSelection() throws {
+        try db().write { db in
+            try SelectedAsset.deleteAll(db)
+        }
+    }
+
+    func getSelectedAssetIds() throws -> Set<String> {
+        try db().read { db in
+            let ids = try SelectedAsset
+                .select(SelectedAsset.Columns.localAssetId)
+                .fetchAll(db)
+                .map { $0.localAssetId }
+            return Set(ids)
+        }
+    }
+
+    func getSelectedAssets() throws -> [SelectedAsset] {
+        try db().read { db in
+            try SelectedAsset
+                .order(SelectedAsset.Columns.syncPriority.desc, SelectedAsset.Columns.addedAt.desc)
+                .fetchAll(db)
+        }
+    }
+
+    func getSelectionCount() throws -> Int {
+        try db().read { db in
+            try SelectedAsset.fetchCount(db)
+        }
+    }
+
+    func isSelected(localAssetId: String) throws -> Bool {
+        try db().read { db in
+            try SelectedAsset
+                .filter(SelectedAsset.Columns.localAssetId == localAssetId)
+                .fetchCount(db) > 0
+        }
+    }
+
+    // MARK: - Album Mappings (F9: Album Creation on Immich)
+
+    func createAlbumMapping(localAlbumId: String, localAlbumTitle: String) throws -> AlbumMapping {
+        var mapping = AlbumMapping(localAlbumId: localAlbumId, localAlbumTitle: localAlbumTitle)
+        try db().write { db in
+            try mapping.insert(db)
+        }
+        return mapping
+    }
+
+    func updateAlbumMapping(_ mapping: AlbumMapping) throws {
+        try db().write { db in
+            try mapping.update(db)
+        }
+    }
+
+    func getAlbumMapping(localAlbumId: String) throws -> AlbumMapping? {
+        try db().read { db in
+            try AlbumMapping
+                .filter(AlbumMapping.Columns.localAlbumId == localAlbumId)
+                .fetchOne(db)
+        }
+    }
+
+    func getAlbumMapping(id: Int64) throws -> AlbumMapping? {
+        try db().read { db in
+            try AlbumMapping.fetchOne(db, key: id)
+        }
+    }
+
+    func getAllAlbumMappings() throws -> [AlbumMapping] {
+        try db().read { db in
+            try AlbumMapping
+                .order(AlbumMapping.Columns.localAlbumTitle.asc)
+                .fetchAll(db)
+        }
+    }
+
+    func deleteAlbumMapping(id: Int64) throws {
+        try db().write { db in
+            try AlbumMapping.deleteOne(db, key: id)
+        }
+    }
+
+    func addAlbumAssetLink(albumMappingId: Int64, localAssetId: String) throws {
+        try db().write { db in
+            // Check if link already exists
+            if try AlbumAssetLink
+                .filter(AlbumAssetLink.Columns.albumMappingId == albumMappingId)
+                .filter(AlbumAssetLink.Columns.localAssetId == localAssetId)
+                .fetchCount(db) > 0 {
+                return
+            }
+            var link = AlbumAssetLink(albumMappingId: albumMappingId, localAssetId: localAssetId)
+            try link.insert(db)
+        }
+    }
+
+    func markAlbumAssetLinksAsSynced(albumMappingId: Int64, localAssetIds: [String]) throws {
+        guard !localAssetIds.isEmpty else { return }
+        try db().write { db in
+            let now = Date()
+            var args: [DatabaseValueConvertible] = [now, albumMappingId]
+            args.append(contentsOf: localAssetIds)
+            try db.execute(
+                sql: """
+                    UPDATE album_asset_links
+                    SET addedToImmichAt = ?
+                    WHERE albumMappingId = ? AND localAssetId IN (\(localAssetIds.map { _ in "?" }.joined(separator: ", ")))
+                    """,
+                arguments: StatementArguments(args)
+            )
+        }
+    }
+
+    func getUnSyncedAlbumAssetLinks(albumMappingId: Int64) throws -> [AlbumAssetLink] {
+        try db().read { db in
+            try AlbumAssetLink
+                .filter(AlbumAssetLink.Columns.albumMappingId == albumMappingId)
+                .filter(AlbumAssetLink.Columns.addedToImmichAt == nil)
+                .fetchAll(db)
+        }
+    }
+
+    func getAlbumAssetCount(albumMappingId: Int64) throws -> Int {
+        try db().read { db in
+            try AlbumAssetLink
+                .filter(AlbumAssetLink.Columns.albumMappingId == albumMappingId)
+                .fetchCount(db)
+        }
+    }
+
+    // MARK: - Sync Conflicts (F10: Conflict Resolution)
+
+    func createConflict(
+        localAssetId: String,
+        immichAssetId: String?,
+        conflictType: ConflictType,
+        localFingerprint: String? = nil,
+        serverChecksum: String? = nil
+    ) throws -> SyncConflict {
+        var conflict = SyncConflict(
+            localAssetId: localAssetId,
+            immichAssetId: immichAssetId,
+            conflictType: conflictType,
+            localFingerprint: localFingerprint,
+            serverChecksum: serverChecksum
+        )
+        try db().write { db in
+            try conflict.insert(db)
+        }
+        return conflict
+    }
+
+    func resolveConflict(id: Int64, resolution: ConflictResolution) throws {
+        try db().write { db in
+            guard var conflict = try SyncConflict.fetchOne(db, key: id) else { return }
+            conflict.resolvedAt = Date()
+            conflict.resolution = resolution.rawValue
+            try conflict.update(db)
+        }
+    }
+
+    func getConflict(id: Int64) throws -> SyncConflict? {
+        try db().read { db in
+            try SyncConflict.fetchOne(db, key: id)
+        }
+    }
+
+    func getUnresolvedConflicts() throws -> [SyncConflict] {
+        try db().read { db in
+            try SyncConflict
+                .filter(SyncConflict.Columns.resolvedAt == nil)
+                .order(SyncConflict.Columns.detectedAt.desc)
+                .fetchAll(db)
+        }
+    }
+
+    func getUnresolvedConflictCount() throws -> Int {
+        try db().read { db in
+            try SyncConflict
+                .filter(SyncConflict.Columns.resolvedAt == nil)
+                .fetchCount(db)
+        }
+    }
+
+    func getAllConflicts(limit: Int = 100) throws -> [SyncConflict] {
+        try db().read { db in
+            try SyncConflict
+                .order(SyncConflict.Columns.detectedAt.desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    func deleteConflict(id: Int64) throws {
+        try db().write { db in
+            try SyncConflict.deleteOne(db, key: id)
+        }
+    }
+
+    func clearResolvedConflicts() throws {
+        try db().write { db in
+            try SyncConflict
+                .filter(SyncConflict.Columns.resolvedAt != nil)
+                .deleteAll(db)
         }
     }
 

@@ -19,8 +19,16 @@ struct RootView: View {
             DashboardView()
         case .sync:
             SyncView()
+        case .selectiveSync:
+            SelectiveSyncView()
+        case .albums:
+            AlbumSyncView()
         case .history:
-            HistoryView()
+            SyncHistoryView()
+        case .serverDiff:
+            ServerDiffView()
+        case .conflicts:
+            ConflictReviewView()
         case .preview:
             PreviewView()
         case .logs:
