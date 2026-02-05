@@ -12,6 +12,12 @@ struct HelpGuideView: View {
             helpDetail
         }
         .frame(width: 900, height: 650)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.escape, modifiers: [])
+            }
+        }
     }
 
     // MARK: - Sidebar
