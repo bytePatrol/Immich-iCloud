@@ -190,6 +190,20 @@ Handle sync conflicts intelligently:
 3. Open the DMG and drag **Immich-iCloud** to Applications
 4. Launch from Applications (or Spotlight)
 
+### macOS Gatekeeper Notice
+
+> **This app is not signed with an Apple Developer certificate.** When you first open it, macOS Gatekeeper will display an error saying the app is "damaged" or "can't be opened." **This is normal and expected.**
+
+**To fix this (one-time setup):**
+
+1. Open **System Settings** → **Privacy & Security**
+2. Scroll down to the **Security** section
+3. You'll see a message about "Immich-iCloud" being blocked
+4. Click **Open Anyway**
+5. Confirm by clicking **Open** in the dialog
+
+The app will open normally after this one-time step.
+
 ### Requirements
 
 - **macOS 14.0** (Sonoma) or later
