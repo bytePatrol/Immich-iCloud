@@ -1,0 +1,61 @@
+name: Immich-iCloud
+options:
+  bundleIdPrefix: com.immich-icloud
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MARKETING_VERSION: "1.1.0"
+    CURRENT_PROJECT_VERSION: "2"
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "7.0.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.0.0"
+
+targets:
+  Immich-iCloud:
+    type: application
+    platform: macOS
+    sources:
+      - Immich-iCloud
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.immich-icloud.app
+        PRODUCT_NAME: Immich-iCloud
+        INFOPLIST_FILE: Immich-iCloud/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Immich-iCloud/Immich-iCloud.entitlements
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - package: GRDB
+      - package: Sparkle
+    entitlements:
+      path: Immich-iCloud/Immich-iCloud.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.photos.library: true
+        com.apple.security.network.client: true
+        com.apple.security.keychain-access-groups:
+          - $(AppIdentifierPrefix)com.immich-icloud.app
+
+  Immich-iCloudTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Immich-iCloudTests
+    dependencies:
+      - target: Immich-iCloud
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.immich-icloud.tests
+        GENERATE_INFOPLIST_FILE: YES
