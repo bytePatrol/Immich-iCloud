@@ -242,6 +242,9 @@ struct SettingsView: View {
                 Toggle("Favorites Only", isOn: $appState.config.filterConfig.favoritesOnly)
                     .help("Only sync assets marked as Favorites in your Photos library")
 
+                Toggle("Exclude Screenshots", isOn: $appState.config.filterConfig.excludeScreenshots)
+                    .help("Skip screenshots when syncing to Immich")
+
                 Divider()
 
                 LabeledContent("Album Filter") {

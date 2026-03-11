@@ -15,6 +15,8 @@ enum AppError: LocalizedError {
     case reconciliationFailed(String)
     case conflictResolutionFailed(String)
     case snapshotRestoreFailed(String)
+    case uploadStalled(String)
+    case materializationTimeout(String)
 
     var errorDescription: String? {
         switch self {
@@ -46,6 +48,10 @@ enum AppError: LocalizedError {
             return "Conflict resolution failed: \(detail)"
         case .snapshotRestoreFailed(let detail):
             return "Snapshot restore failed: \(detail)"
+        case .uploadStalled(let detail):
+            return "Upload stalled: \(detail)"
+        case .materializationTimeout(let detail):
+            return "Asset download timed out: \(detail)"
         }
     }
 }

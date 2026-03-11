@@ -41,6 +41,12 @@ struct RetryPolicy {
                 return detail.contains("HTTP 5") || detail.contains("HTTP 429")
             case .immichUploadFailed(let detail):
                 return detail.contains("HTTP 5") || detail.contains("HTTP 429")
+            case .uploadStalled:
+                // Stalled uploads are transient — the server is still alive
+                return true
+            case .materializationTimeout:
+                // iCloud download timeouts may succeed on retry
+                return true
             default:
                 return false
             }

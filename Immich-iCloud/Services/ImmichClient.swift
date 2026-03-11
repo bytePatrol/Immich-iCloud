@@ -1,5 +1,119 @@
 import Foundation
 
+// MARK: - Upload Progress Delegate
+
+/// Tracks per-byte upload progress, detects stalls, and bridges URLSession callbacks to async/await.
+///
+/// Threading model:
+///  - All URLSession delegate methods run on the serial `delegateQueue` passed to URLSession.
+///  - The stall watchdog runs on a Swift concurrency Task (different thread).
+///  - `nonisolated(unsafe)` state written by the delegate queue is read by the watchdog; since
+///    the worst-case outcome of a stale read is one missed stall-check cycle (10s), this is safe.
+private final class UploadProgressDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+
+    private let continuation: CheckedContinuation<(Data, URLResponse), Error>
+    private let stallThreshold: TimeInterval
+
+    // Written on the serial delegate queue; occasional stale reads by the watchdog are acceptable.
+    nonisolated(unsafe) private var receivedData = Data()
+    nonisolated(unsafe) private var lastBytesSent: Int64 = 0
+    nonisolated(unsafe) private var lastProgressTime = Date()
+    nonisolated(unsafe) private var completed = false
+    nonisolated(unsafe) private var cancelledForStall = false
+    nonisolated(unsafe) private var loggedMilestones = Set<Int>()
+
+    private weak var uploadTask: URLSessionUploadTask?
+    private var uploadSession: URLSession?
+    private var stallWatchdog: Task<Void, Never>?
+    nonisolated(unsafe) private var fileName = ""
+
+    init(continuation: CheckedContinuation<(Data, URLResponse), Error>, stallThreshold: TimeInterval) {
+        self.continuation = continuation
+        self.stallThreshold = stallThreshold
+    }
+
+    func start(task: URLSessionUploadTask, session: URLSession, fileName: String) {
+        self.uploadTask = task
+        self.uploadSession = session
+        self.fileName = fileName
+        startStallWatchdog()
+    }
+
+    private func startStallWatchdog() {
+        stallWatchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // check every 10s
+                guard let self, !self.completed else { return }
+
+                let elapsed = Date().timeIntervalSince(self.lastProgressTime)
+                let name = self.fileName
+
+                if elapsed > self.stallThreshold {
+                    await MainActor.run {
+                        AppLogger.shared.warning(
+                            "Upload stalled — no progress for \(Int(elapsed))s [\(name)], cancelling",
+                            category: "Upload"
+                        )
+                    }
+                    self.cancelledForStall = true
+                    self.uploadTask?.cancel()
+                    return
+                }
+            }
+        }
+    }
+
+    // MARK: - URLSessionTaskDelegate
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        if totalBytesSent > lastBytesSent {
+            lastBytesSent = totalBytesSent
+            lastProgressTime = Date()
+        }
+
+        guard totalBytesExpectedToSend > 0 else { return }
+        let pct = Int(100 * totalBytesSent / totalBytesExpectedToSend)
+        for milestone in [25, 50, 75] where pct >= milestone && !loggedMilestones.contains(milestone) {
+            loggedMilestones.insert(milestone)
+            let sentStr = ByteCountFormatter.string(fromByteCount: totalBytesSent, countStyle: .file)
+            let totalStr = ByteCountFormatter.string(fromByteCount: totalBytesExpectedToSend, countStyle: .file)
+            let msg = "Upload [\(fileName)]: \(milestone)% (\(sentStr) / \(totalStr))"
+            Task { @MainActor in AppLogger.shared.debug(msg, category: "Upload") }
+        }
+    }
+
+    // MARK: - URLSessionDataDelegate
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        receivedData.append(data)
+    }
+
+    // MARK: - Task Completion
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        stallWatchdog?.cancel()
+        completed = true
+
+        let stalledCancel = cancelledForStall
+        let data = receivedData
+        uploadSession?.finishTasksAndInvalidate()
+
+        if let error {
+            if let urlError = error as? URLError, urlError.code == .cancelled, stalledCancel {
+                continuation.resume(throwing: AppError.uploadStalled(
+                    "No upload progress for \(Int(stallThreshold))s"
+                ))
+            } else {
+                continuation.resume(throwing: error)
+            }
+        } else if let response = task.response {
+            continuation.resume(returning: (data, response))
+        } else {
+            continuation.resume(throwing: AppError.immichConnectionFailed("No response received"))
+        }
+    }
+}
+
 actor ImmichClient {
     private var baseURL: String
     private var apiKey: String
@@ -99,12 +213,41 @@ actor ImmichClient {
         // Close boundary
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
-        request.httpBody = body
-
-        let (responseData, response) = try await session.data(for: request)
+        let (responseData, response) = try await performTrackedUpload(
+            request: request,
+            body: body,
+            fileName: fileName
+        )
         try validateHTTPResponse(response, data: responseData)
 
         return try decoder.decode(ImmichUploadResponse.self, from: responseData)
+    }
+
+    // MARK: - Tracked Upload (progress monitoring + stall detection)
+
+    private func performTrackedUpload(
+        request: URLRequest,
+        body: Data,
+        fileName: String
+    ) async throws -> (Data, URLResponse) {
+        let stallThreshold: TimeInterval = 60
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let delegate = UploadProgressDelegate(continuation: continuation, stallThreshold: stallThreshold)
+
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 60   // time between receiving any bytes
+            config.timeoutIntervalForResource = 3600 // hard cap for enormous files
+            let uploadSession = URLSession(
+                configuration: config,
+                delegate: delegate,
+                delegateQueue: OperationQueue()
+            )
+
+            let task = uploadSession.uploadTask(with: request, from: body)
+            delegate.start(task: task, session: uploadSession, fileName: fileName)
+            task.resume()
+        }
     }
 
     // MARK: - Asset Info (for diffing)

@@ -133,7 +133,7 @@ echo "[7/7] Creating styled DMG..."
 # create-dmg flags:
 #   --volname: Name shown in Finder title bar
 #   --volicon: Icon for the mounted volume
-#   --background: Background image (660x400px matching window size)
+#   --background: Background image (640x360px matching window size)
 #   --window-pos: Position on screen when opened
 #   --window-size: Window dimensions in points
 #   --icon-size: Size of icons in the DMG window
@@ -145,9 +145,9 @@ echo "[7/7] Creating styled DMG..."
 CREATE_DMG_ARGS=(
     --volname "${APP_NAME}"
     --window-pos 200 120
-    --window-size 660 400
+    --window-size 640 360
     --icon-size 128
-    --icon "${APP_NAME}.app" 180 170
+    --icon "${APP_NAME}.app" 200 170
     --app-drop-link 480 170
     --no-internet-enable
     --hide-extension "${APP_NAME}.app"

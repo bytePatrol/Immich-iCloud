@@ -214,6 +214,17 @@ final class SyncEngine {
         let maxRetries = appState.config.maxRetries
         let policy = RetryPolicy(maxRetries: maxRetries)
 
+        // Pre-resolve filename once so retry logs are human-readable
+        let resourceInfo = await PhotoLibraryService.shared.resourceInfo(for: phAsset)
+        let filename = resourceInfo?.filename ?? phAsset.localIdentifier
+
+        let mediaType: MediaType
+        switch phAsset.mediaType {
+        case .image: mediaType = .photo
+        case .video: mediaType = .video
+        default: mediaType = .unknown
+        }
+
         var lastError: Error?
 
         for attempt in 0...maxRetries {
@@ -223,7 +234,7 @@ final class SyncEngine {
                 if !retryEnabled { break }
                 let delay = policy.delay(forAttempt: attempt - 1)
                 AppLogger.shared.info(
-                    "Retry \(attempt)/\(maxRetries) for \(phAsset.localIdentifier) after \(String(format: "%.1f", delay))s",
+                    "Retry \(attempt)/\(maxRetries) for '\(filename)' after \(String(format: "%.1f", delay))s — \(lastError?.localizedDescription ?? "unknown error")",
                     category: "Sync"
                 )
                 appState.syncProgress.retryCount += 1
@@ -244,15 +255,10 @@ final class SyncEngine {
 
         // All retries exhausted — record final failure
         if let error = lastError {
-            let resourceInfo = await PhotoLibraryService.shared.resourceInfo(for: phAsset)
-            let filename = resourceInfo?.filename ?? "unknown"
-            AppLogger.shared.error("Failed after retries: \(filename) — \(error.localizedDescription)", category: "Sync")
-            let mediaType: MediaType
-            switch phAsset.mediaType {
-            case .image: mediaType = .photo
-            case .video: mediaType = .video
-            default: mediaType = .unknown
-            }
+            AppLogger.shared.error(
+                "Failed after \(maxRetries) retries: '\(filename)' — \(error.localizedDescription)",
+                category: "Sync"
+            )
             await recordFailure(
                 localId: phAsset.localIdentifier, fingerprint: nil, date: phAsset.creationDate,
                 mediaType: mediaType, error: error.localizedDescription, isDryRun: isDryRun
@@ -266,6 +272,7 @@ final class SyncEngine {
         let localId = phAsset.localIdentifier
         let resourceInfo = await PhotoLibraryService.shared.resourceInfo(for: phAsset)
         let filename = resourceInfo?.filename ?? "unknown"
+        let estimatedSize = resourceInfo?.fileSize ?? 0
         appState.syncProgress.currentAssetName = filename
 
         let mediaType: MediaType
@@ -275,13 +282,16 @@ final class SyncEngine {
         default: mediaType = .unknown
         }
 
-        // Step 1: Materialize asset data from iCloud/local storage
-        let materialized: PhotoLibraryService.MaterializedAsset?
-        if phAsset.mediaType == .video {
-            materialized = try await PhotoLibraryService.shared.requestVideoData(for: phAsset)
-        } else {
-            materialized = try await PhotoLibraryService.shared.requestImageData(for: phAsset)
-        }
+        // Step 1: Materialize asset data from iCloud/local storage (with timeout)
+        let sizeHint = estimatedSize > 0
+            ? " (~\(ByteCountFormatter.string(fromByteCount: estimatedSize, countStyle: .file)))"
+            : ""
+        AppLogger.shared.debug("Materializing \(filename)\(sizeHint)...", category: "Sync")
+        let materializeStart = Date()
+
+        let materialized = try await materializeWithTimeout(phAsset, timeout: 180)
+
+        let materializeElapsed = Date().timeIntervalSince(materializeStart)
 
         guard let materialized else {
             AppLogger.shared.warning("Could not materialize \(filename)", category: "Sync")
@@ -291,6 +301,11 @@ final class SyncEngine {
             )
             return
         }
+
+        AppLogger.shared.debug(
+            "Materialized \(filename) in \(String(format: "%.1f", materializeElapsed))s",
+            category: "Sync"
+        )
 
         // Step 2: Generate SHA256 fingerprint
         let fingerprint = PhotoFingerprint.generate(from: materialized.data)
@@ -311,6 +326,7 @@ final class SyncEngine {
             AppLogger.shared.info("[DRY RUN] Would upload \(filename) (\(sizeStr))", category: "Sync")
         } else {
             AppLogger.shared.info("Uploading \(filename) (\(sizeStr))...", category: "Sync")
+            let uploadStart = Date()
 
             let response = try await client.uploadAsset(
                 data: materialized.data,
@@ -318,6 +334,10 @@ final class SyncEngine {
                 creationDate: phAsset.creationDate,
                 mediaType: mediaType
             )
+
+            let uploadElapsed = Date().timeIntervalSince(uploadStart)
+            let bytesPerSec = uploadElapsed > 0.001 ? Int64(Double(assetSize) / uploadElapsed) : assetSize
+            let speedStr = ByteCountFormatter.string(fromByteCount: bytesPerSec, countStyle: .file)
 
             // Track bytes transferred for session stats
             sessionBytesTransferred += assetSize
@@ -332,11 +352,36 @@ final class SyncEngine {
             )
 
             let dupNote = response.isDuplicate ? " (Immich duplicate)" : ""
-            AppLogger.shared.info("Uploaded \(filename) \u{2192} \(response.id)\(dupNote)", category: "Sync")
+            AppLogger.shared.info(
+                "Uploaded \(filename) \u{2192} \(response.id)\(dupNote) [\(String(format: "%.1f", uploadElapsed))s @ \(speedStr)/s]",
+                category: "Sync"
+            )
         }
 
         appState.syncProgress.uploadedAssets += 1
         appState.syncProgress.processedAssets += 1
+    }
+
+    // MARK: - Materialization with Timeout
+
+    private func materializeWithTimeout(_ phAsset: PHAsset, timeout: TimeInterval) async throws -> PhotoLibraryService.MaterializedAsset? {
+        try await withThrowingTaskGroup(of: PhotoLibraryService.MaterializedAsset?.self) { group in
+            group.addTask {
+                if phAsset.mediaType == .video {
+                    return try await PhotoLibraryService.shared.requestVideoData(for: phAsset)
+                } else {
+                    return try await PhotoLibraryService.shared.requestImageData(for: phAsset)
+                }
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw AppError.materializationTimeout("iCloud download stalled after \(Int(timeout))s")
+            }
+
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
     }
 
     // MARK: - Checkpoint

@@ -3,6 +3,7 @@ import Foundation
 struct FilterConfig: Codable, Equatable {
     var mediaTypeFilter: MediaTypeFilter = .all
     var favoritesOnly: Bool = false
+    var excludeScreenshots: Bool = false
     var albumFilterMode: AlbumFilterMode = .all
     var selectedAlbumIds: [String] = []
     var excludedAlbumIds: [String] = []
@@ -28,7 +29,7 @@ struct FilterConfig: Codable, Equatable {
     }
 
     var hasActiveFilters: Bool {
-        mediaTypeFilter != .all || favoritesOnly || albumFilterMode != .all || syncMode != .filterBased
+        mediaTypeFilter != .all || favoritesOnly || excludeScreenshots || albumFilterMode != .all || syncMode != .filterBased
     }
 
     init() {}
@@ -37,6 +38,7 @@ struct FilterConfig: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         mediaTypeFilter = try container.decodeIfPresent(MediaTypeFilter.self, forKey: .mediaTypeFilter) ?? .all
         favoritesOnly = try container.decodeIfPresent(Bool.self, forKey: .favoritesOnly) ?? false
+        excludeScreenshots = try container.decodeIfPresent(Bool.self, forKey: .excludeScreenshots) ?? false
         albumFilterMode = try container.decodeIfPresent(AlbumFilterMode.self, forKey: .albumFilterMode) ?? .all
         selectedAlbumIds = try container.decodeIfPresent([String].self, forKey: .selectedAlbumIds) ?? []
         excludedAlbumIds = try container.decodeIfPresent([String].self, forKey: .excludedAlbumIds) ?? []

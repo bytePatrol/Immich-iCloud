@@ -56,6 +56,11 @@ actor PhotoLibraryService {
             predicates.append(NSPredicate(format: "isFavorite == YES"))
         }
 
+        // Screenshots filter — PHAssetMediaSubtype.photoScreenshot = 1 << 3 = 8
+        if filterConfig.excludeScreenshots {
+            predicates.append(NSPredicate(format: "(mediaSubtype & %d) == 0", PHAssetMediaSubtype.photoScreenshot.rawValue))
+        }
+
         if !predicates.isEmpty {
             fetchOptions.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         }
