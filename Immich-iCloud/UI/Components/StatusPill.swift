@@ -28,8 +28,8 @@ struct StatusPill: View {
         case .new: return "New"
         case .uploaded: return "Uploaded"
         case .blocked: return "Blocked"
-        case .ignored: return "Ignored"
-        case .failed: return "Failed"
+        case .ignored: return "Skipped"
+        case .failed: return "Error"
         }
     }
 

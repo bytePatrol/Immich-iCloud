@@ -1,6 +1,7 @@
 import Foundation
 import Photos
 import AppKit
+import AVFoundation
 
 actor PhotoLibraryService {
     static let shared = PhotoLibraryService()
@@ -317,6 +318,20 @@ actor PhotoLibraryService {
             filename: videoResource.originalFilename,
             uniformTypeIdentifier: videoResource.uniformTypeIdentifier
         )
+    }
+
+    // MARK: - AVAsset for Video Playback
+
+    func requestAVAsset(for asset: PHAsset) async -> AVAsset? {
+        await withCheckedContinuation { continuation in
+            let options = PHVideoRequestOptions()
+            options.deliveryMode = .automatic
+            options.isNetworkAccessAllowed = true
+
+            imageManager.requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+                continuation.resume(returning: avAsset)
+            }
+        }
     }
 
     // MARK: - Cache Management

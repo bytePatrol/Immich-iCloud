@@ -22,6 +22,10 @@ struct AppConfig: Codable {
     var customDatabasePath: String? = nil  // nil = use default ~/Library/Application Support/
     var snapshotsEnabled: Bool = true
 
+    // v2.6.0: Wake Photos before sync
+    var wakePhotosBeforeSync: Bool = false
+    var photosWakeDelay: Int = 60  // seconds
+
     init() {}
 
     init(from decoder: Decoder) throws {
@@ -38,6 +42,8 @@ struct AppConfig: Codable {
         onboardingComplete = try container.decodeIfPresent(Bool.self, forKey: .onboardingComplete) ?? false
         customDatabasePath = try container.decodeIfPresent(String.self, forKey: .customDatabasePath)
         snapshotsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snapshotsEnabled) ?? true
+        wakePhotosBeforeSync = try container.decodeIfPresent(Bool.self, forKey: .wakePhotosBeforeSync) ?? false
+        photosWakeDelay = try container.decodeIfPresent(Int.self, forKey: .photosWakeDelay) ?? 60
     }
 
     // MARK: - Persistence

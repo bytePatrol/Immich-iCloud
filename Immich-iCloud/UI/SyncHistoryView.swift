@@ -29,6 +29,7 @@ struct SyncHistoryView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .frame(width: 250)
                 .help("Toggle between sync session history and individual ledger records")
             }

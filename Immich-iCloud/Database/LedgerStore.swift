@@ -248,6 +248,76 @@ actor LedgerStore {
         }
     }
 
+    /// Batch-fetch ledger records keyed by localAssetId. Uses a single WHERE IN query.
+    func recordsForAssets(localAssetIds: [String]) throws -> [String: LedgerRecord] {
+        guard !localAssetIds.isEmpty else { return [:] }
+        return try db().read { db in
+            let placeholders = localAssetIds.map { _ in "?" }.joined(separator: ", ")
+            let args: [DatabaseValueConvertible] = localAssetIds
+            let records = try LedgerRecord
+                .filter(sql: "localAssetId IN (\(placeholders))", arguments: StatementArguments(args))
+                .fetchAll(db)
+            return Dictionary(uniqueKeysWithValues: records.map { ($0.localAssetId, $0) })
+        }
+    }
+
+    /// Mark an asset as ignored (Never Upload). Will not overwrite an uploaded record.
+    func markAsIgnored(localAssetId: String) throws {
+        try db().write { db in
+            // Don't overwrite an uploaded record
+            if let existing = try LedgerRecord
+                .filter(Column("localAssetId") == localAssetId)
+                .fetchOne(db),
+               existing.status == AssetStatus.uploaded.rawValue {
+                return
+            }
+
+            if let existing = try LedgerRecord
+                .filter(Column("localAssetId") == localAssetId)
+                .fetchOne(db) {
+                var updated = existing
+                updated.status = AssetStatus.ignored.rawValue
+                try updated.update(db)
+            } else {
+                var record = LedgerRecord(
+                    id: nil,
+                    localAssetId: localAssetId,
+                    fingerprint: nil,
+                    creationDate: nil,
+                    mediaType: MediaType.unknown.rawValue,
+                    immichAssetId: nil,
+                    status: AssetStatus.ignored.rawValue,
+                    firstUploadedAt: nil,
+                    lastSeenInICloudAt: Date(),
+                    errorMessage: nil,
+                    uploadAttemptCount: 0
+                )
+                try record.insert(db)
+            }
+        }
+    }
+
+    /// Reset a record back to 'new' for force re-upload. Intentional bypass of upload safety check.
+    func resetForReUpload(localAssetId: String) throws {
+        try db().write { db in
+            try db.execute(
+                sql: "UPDATE ledger SET status = 'new', immichAssetId = NULL, errorMessage = NULL WHERE localAssetId = ?",
+                arguments: [localAssetId]
+            )
+        }
+    }
+
+    /// Check if an asset is ignored or uploaded (should be skipped during sync).
+    func isIgnoredOrUploaded(localAssetId: String) throws -> Bool {
+        try db().read { db in
+            let count = try LedgerRecord
+                .filter(Column("localAssetId") == localAssetId)
+                .filter(sql: "status IN ('ignored', 'uploaded')")
+                .fetchCount(db)
+            return count > 0
+        }
+    }
+
     // MARK: - Stats
 
     func stats() throws -> LedgerStats {

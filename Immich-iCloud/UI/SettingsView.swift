@@ -19,7 +19,7 @@ struct SettingsView: View {
         @Bindable var appState = appState
 
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 Text("Settings")
                     .font(.largeTitle.bold())
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -29,12 +29,14 @@ struct SettingsView: View {
                 retrySection(appState: appState)
                 filteringSection(appState: appState)
                 autoSyncSection(appState: appState)
+                wakePhotosSection(appState: appState)
                 databaseLocationSection(appState: appState)
                 snapshotsSection(appState: appState)
                 updatesSection
                 dataManagementSection
                 aboutSection
             }
+            .frame(maxWidth: .infinity)
             .padding(24)
         }
         .onAppear {
@@ -88,7 +90,9 @@ struct SettingsView: View {
 
                     connectionStatusLabel
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
     }
@@ -173,6 +177,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
     }
@@ -219,6 +224,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
     }
@@ -270,6 +276,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
     }
@@ -310,6 +317,48 @@ struct SettingsView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - Wake Photos Before Sync
+
+    private func wakePhotosSection(appState: AppState) -> some View {
+        @Bindable var appState = appState
+
+        return GroupBox("iCloud Photos Wake") {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Wake Photos Before Each Sync", isOn: $appState.config.wakePhotosBeforeSync)
+                    .help("Opens Photos.app silently before syncing so iCloud downloads finish before the scan starts")
+
+                if appState.config.wakePhotosBeforeSync {
+                    LabeledContent("Wake Duration") {
+                        Picker("", selection: $appState.config.photosWakeDelay) {
+                            Text("30 seconds").tag(30)
+                            Text("60 seconds").tag(60)
+                            Text("90 seconds").tag(90)
+                            Text("2 minutes").tag(120)
+                        }
+                        .frame(maxWidth: 200)
+                        .help("How long to keep Photos open before closing it and starting the sync")
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Photos.app will be opened hidden and kept running for the chosen duration so iCloud can download new assets. It is then closed automatically — but only if it wasn't already running.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Recommended for always-on Macs (Mac mini, Mac Pro) where Photos is rarely opened manually.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Enable this if you run Immich-iCloud on a Mac where Photos.app is rarely opened. New iCloud photos won't download unless Photos is running.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
     }
@@ -366,6 +415,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
         .alert("Restart Required", isPresented: $showRestartRequiredAlert) {
@@ -467,6 +517,7 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
                 .help("View and restore database snapshots")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
         .sheet(isPresented: $showSnapshotsSheet) {
@@ -540,6 +591,7 @@ struct SettingsView: View {
                 .buttonStyle(.link)
                 .help("Open github.com/bytePatrol/Immich-iCloud/releases in your browser")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
     }
@@ -592,6 +644,7 @@ struct SettingsView: View {
                         .transition(.opacity)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
         }
         .alert("Reset Ledger?", isPresented: $showingResetAlert) {
@@ -641,6 +694,7 @@ struct SettingsView: View {
                     .help("Open the Immich-iCloud GitHub repository in your browser")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
         }
     }

@@ -38,6 +38,12 @@ final class SyncEngine {
 
         AppLogger.shared.info("Sync started\(isDryRun ? " [DRY RUN]" : "")", category: "Sync")
 
+        // --- Phase 0: Wake Photos (optional) ---
+        if appState.config.wakePhotosBeforeSync {
+            await PhotosWaker.wakeAndWait(seconds: appState.config.photosWakeDelay)
+            guard appState.isSyncing else { return handleCancellation() }
+        }
+
         // --- Phase 1: Scan Photos Library ---
         appState.syncProgress.phase = .scanning
 
@@ -106,7 +112,7 @@ final class SyncEngine {
             }
 
             do {
-                if try await LedgerStore.shared.hasBeenUploaded(localAssetId: phAsset.localIdentifier) {
+                if try await LedgerStore.shared.isIgnoredOrUploaded(localAssetId: phAsset.localIdentifier) {
                     appState.syncProgress.skippedAssets += 1
                 } else {
                     assetsToProcess.append(phAsset)
@@ -209,7 +215,7 @@ final class SyncEngine {
 
     // MARK: - Per-Asset Processing with Retry
 
-    private func processAssetWithRetry(_ phAsset: PHAsset, client: ImmichClient, isDryRun: Bool) async {
+    func processAssetWithRetry(_ phAsset: PHAsset, client: ImmichClient, isDryRun: Bool) async {
         let retryEnabled = appState.config.retryEnabled
         let maxRetries = appState.config.maxRetries
         let policy = RetryPolicy(maxRetries: maxRetries)
@@ -476,6 +482,25 @@ final class SyncEngine {
     private func handleCancellation() {
         AppLogger.shared.warning("Sync cancelled by user", category: "Sync")
         finishSync(phase: .idle)
+    }
+
+    /// Force upload a single asset by localAssetId, bypassing normal sync pipeline.
+    func forceUploadSingleAsset(localAssetId: String) async {
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [localAssetId], options: nil)
+        guard let phAsset = fetchResult.firstObject else {
+            AppLogger.shared.error("Force re-upload: asset not found in Photos library: \(localAssetId)", category: "Preview")
+            return
+        }
+
+        let client = ImmichClient(baseURL: appState.serverURL, apiKey: appState.apiKey)
+        let isDryRun = appState.config.isDryRun
+
+        AppLogger.shared.info("Force re-uploading asset: \(localAssetId)", category: "Preview")
+        await processAssetWithRetry(phAsset, client: client, isDryRun: isDryRun)
+
+        Task {
+            await appState.refreshLedgerStats()
+        }
     }
 
     /// Whether a checkpoint exists for potential resume

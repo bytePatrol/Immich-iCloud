@@ -284,10 +284,66 @@ final class AppState {
             summaries.append(summary)
         }
 
+        // Batch-fetch ledger records to populate real status, fingerprint, and immichAssetId
+        let allIds = summaries.map { $0.localAssetId }
+        let ledgerRecords = (try? await LedgerStore.shared.recordsForAssets(localAssetIds: allIds)) ?? [:]
+        for i in summaries.indices {
+            let id = summaries[i].localAssetId
+            if let record = ledgerRecords[id] {
+                summaries[i].status = AssetStatus(rawValue: record.status) ?? .new
+                summaries[i].fingerprint = record.fingerprint
+                summaries[i].immichAssetId = record.immichAssetId
+            }
+        }
+
         scannedAssets = summaries
         isScanning = false
 
         AppLogger.shared.info("Scan complete: \(summaries.count) assets ready", category: "Photos")
+    }
+
+    func markNeverUpload(localAssetId: String) async {
+        do {
+            try await LedgerStore.shared.markAsIgnored(localAssetId: localAssetId)
+            if let idx = scannedAssets.firstIndex(where: { $0.localAssetId == localAssetId }) {
+                scannedAssets[idx].status = .ignored
+                scannedAssets[idx].immichAssetId = nil
+            }
+            AppLogger.shared.info("Marked asset as Never Upload: \(localAssetId)", category: "Preview")
+        } catch {
+            AppLogger.shared.error("Failed to mark asset as ignored: \(error.localizedDescription)", category: "Preview")
+        }
+    }
+
+    func forceReUpload(localAssetId: String) async {
+        guard !isSyncing else {
+            AppLogger.shared.warning("Cannot force re-upload while sync is in progress", category: "Preview")
+            return
+        }
+        guard hasValidCredentials else {
+            AppLogger.shared.error("Cannot force re-upload: server credentials not configured", category: "Preview")
+            return
+        }
+        do {
+            try await LedgerStore.shared.resetForReUpload(localAssetId: localAssetId)
+            AppLogger.shared.info("Reset ledger record for re-upload: \(localAssetId)", category: "Preview")
+
+            // isSyncing must be true so processAssetWithRetry's guard passes
+            isSyncing = true
+            let syncEngine = SyncEngine(appState: self)
+            await syncEngine.forceUploadSingleAsset(localAssetId: localAssetId)
+            isSyncing = false
+
+            // Refresh status from ledger
+            if let record = try? await LedgerStore.shared.record(forLocalAssetId: localAssetId),
+               let idx = scannedAssets.firstIndex(where: { $0.localAssetId == localAssetId }) {
+                scannedAssets[idx].status = AssetStatus(rawValue: record.status) ?? .new
+                scannedAssets[idx].immichAssetId = record.immichAssetId
+            }
+        } catch {
+            isSyncing = false
+            AppLogger.shared.error("Force re-upload failed: \(error.localizedDescription)", category: "Preview")
+        }
     }
 
     func loadThumbnail(for assetId: String) async {
